@@ -17,6 +17,12 @@ npm install
 npm run dev
 ```
 
+link, in order:
+
+GitHub repo — https://github.com/bukola2005/weave
+Live deployment — weave-virid-three.vercel.app
+README link — https://github.com/bukola2005/weave/blob/main/README.md
+
 ## Folder structure
 
 ```
