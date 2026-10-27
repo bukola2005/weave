@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import { useDomainStore } from '../store/domainStore';
 import { useUIStore, type ModalState } from '../store/uiStore';
-import Modal from './Modal';
+import Modal from './ui/Modal';
+import Button from './ui/Button';
+import Input from './ui/Input';
 
 interface Props {
   modal: Extract<ModalState, { type: 'column' } | { type: 'renameColumn' }>;
@@ -37,24 +39,20 @@ export default function ColumnFormModal({ modal }: Props) {
       onClose={closeModal}
     >
       <form onSubmit={handleSubmit}>
-        <div className="field">
-          <label htmlFor="column-name">Column name</label>
-          <input
-            id="column-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. In review"
-            maxLength={40}
-            required
-          />
-        </div>
+        <Input
+          id="column-name"
+          label="Column name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. In review"
+          maxLength={40}
+          required
+        />
         <div className="dialog-actions">
-          <button type="button" className="secondary" onClick={closeModal}>
-            Cancel
-          </button>
-          <button type="submit" className="primary">
+          <Button onClick={closeModal}>Cancel</Button>
+          <Button type="submit" variant="primary">
             {isRename ? 'Save name' : 'Create column'}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>

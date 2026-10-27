@@ -1,19 +1,26 @@
 import { useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useDomainStore } from '../store/domainStore';
 import { useUIStore } from '../store/uiStore';
-import Modal from './Modal';
+import Modal from './ui/Modal';
+import Button from './ui/Button';
+import Input from './ui/Input';
 
 export default function BoardFormModal() {
   const addBoard = useDomainStore((s) => s.addBoard);
   const closeModal = useUIStore((s) => s.closeModal);
+  const pushToast = useUIStore((s) => s.pushToast);
+  const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !description.trim()) return;
-    addBoard(title.trim(), description.trim());
+    const id = addBoard(title.trim(), description.trim());
     closeModal();
+    pushToast({ tone: 'success', message: `Created board “${title.trim()}”.` }, 3000);
+    navigate(`/board/${id}`);
   };
 
   return (
@@ -24,35 +31,29 @@ export default function BoardFormModal() {
       onClose={closeModal}
     >
       <form onSubmit={handleSubmit}>
-        <div className="field">
-          <label htmlFor="board-title">Board title</label>
-          <input
-            id="board-title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g. Website refresh"
-            maxLength={65}
-            required
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="board-description">Short description</label>
-          <input
-            id="board-description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="What is this board for?"
-            maxLength={110}
-            required
-          />
-        </div>
+        <Input
+          id="board-title"
+          label="Board title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="e.g. Website refresh"
+          maxLength={65}
+          required
+        />
+        <Input
+          id="board-description"
+          label="Short description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="What is this board for?"
+          maxLength={110}
+          required
+        />
         <div className="dialog-actions">
-          <button type="button" className="secondary" onClick={closeModal}>
-            Cancel
-          </button>
-          <button type="submit" className="primary">
+          <Button onClick={closeModal}>Cancel</Button>
+          <Button type="submit" variant="primary">
             Create board
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>

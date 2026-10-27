@@ -1,33 +1,45 @@
-import { useMemo, useState } from 'react';
+import { useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useDomainStore } from '../store/domainStore';
 import { useUIStore } from '../store/uiStore';
 import Column from '../components/Column';
+import Button from '../components/ui/Button';
+import EmptyState from '../components/ui/EmptyState';
+import { BoardSkeleton } from '../components/ui/Skeleton';
+import UndoRedoControls from '../components/UndoRedoControls';
 
-const DOT_COLORS = ['#8692a3', '#565297', '#598976', '#a1702e', '#7a4f9c'];
+const DOT_COLORS = ['#8692a3', '#6f6bc0', '#598976', '#a1702e', '#9a6cbd'];
 
+// Subscribes to the board only. It re-renders when columns are added,
+// removed or renamed — not when cards move, since columns read their own data.
 export default function BoardView() {
   const { boardId } = useParams();
   const board = useDomainStore((s) => (boardId ? s.boards[boardId] : undefined));
-  const columnsRecord = useDomainStore((s) => s.columns);
-  const cardsRecord = useDomainStore((s) => s.cards);
+  const hydrated = useUIStore((s) => s.hydrated);
   const openModal = useUIStore((s) => s.openModal);
-  const [searchQuery, setSearchQuery] = useState('');
+  const searchQuery = useUIStore((s) => s.searchQuery);
+  const setSearchQuery = useUIStore((s) => s.setSearchQuery);
 
-  const orderedColumns = useMemo(
-    () => (board ? board.columnIds.map((id) => columnsRecord[id]).filter(Boolean) : []),
-    [board, columnsRecord]
-  );
+  // Search is per-board; don't carry a filter over when switching boards.
+  useEffect(() => () => setSearchQuery(''), [boardId, setSearchQuery]);
 
   if (!board) {
+    if (!hydrated) return <BoardSkeleton />;
     return (
-      <section>
-        <p className="subtitle">
-          That board doesn't exist (or was deleted). <Link to="/">Back to the workspace</Link>.
-        </p>
-      </section>
+      <EmptyState
+        title="That board doesn’t exist"
+        action={
+          <Link className="btn btn-primary" to="/">
+            Back to the workspace
+          </Link>
+        }
+      >
+        It may have been deleted — possibly from another tab.
+      </EmptyState>
     );
   }
+
+  const columnIds = board.columnIds;
 
   return (
     <section aria-labelledby="active-board-title">
@@ -40,6 +52,7 @@ export default function BoardView() {
           <p className="subtitle">{board.description}</p>
         </div>
         <div className="actions">
+          <UndoRedoControls />
           <label htmlFor="task-search" className="sr-only">
             Search cards
           </label>
@@ -55,33 +68,33 @@ export default function BoardView() {
         </div>
       </header>
 
-      {orderedColumns.length === 0 ? (
-        <div className="empty-state">
-          <h2>Give this board its shape</h2>
-          <p>Create columns like To do, In progress, and Done to start moving work forward.</p>
-          <button
-            type="button"
-            className="primary"
-            onClick={() => openModal({ type: 'column', boardId: board.id })}
-          >
-            + Add a column
-          </button>
-        </div>
+      {columnIds.length === 0 ? (
+        <EmptyState
+          title="Give this board its shape"
+          action={
+            <Button variant="primary" onClick={() => openModal({ type: 'column', boardId: board.id })}>
+              + Add a column
+            </Button>
+          }
+        >
+          Create columns like To do, In progress, and Done to start moving work forward.
+        </EmptyState>
       ) : (
         <section aria-labelledby="kanban-heading" style={{ marginTop: 31 }}>
           <div className="section-head">
             <h2 id="kanban-heading">The work, in progress</h2>
-            <p>Use the arrows to move cards along</p>
+            <p id="drag-instructions">
+              Drag cards to reorder, or focus a card’s ⠿ grip and use the arrow keys.
+            </p>
           </div>
-          <div className="kanban" role="list" aria-label="Board columns">
-            {orderedColumns.map((column, index) => (
+          <div className="kanban" data-kanban-scroller>
+            {columnIds.map((id, index) => (
               <Column
-                key={column.id}
-                column={column}
-                cardsRecord={cardsRecord}
-                orderedColumns={orderedColumns}
+                key={id}
+                columnId={id}
+                prevColumnId={columnIds[index - 1]}
+                nextColumnId={columnIds[index + 1]}
                 dotColor={DOT_COLORS[index % DOT_COLORS.length]}
-                searchQuery={searchQuery}
               />
             ))}
             <button

@@ -1,11 +1,18 @@
 import { useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useDomainStore } from '../store/domainStore';
+import { useUIStore } from '../store/uiStore';
+import { DISPLAY_NAME } from '../lib/identity';
+import Badge from './ui/Badge';
+import ThemeToggle from './ThemeToggle';
 
 export default function Sidebar() {
   const boardsRecord = useDomainStore((s) => s.boards);
   const boards = useMemo(() => Object.values(boardsRecord), [boardsRecord]);
   const { boardId: activeBoardId } = useParams();
+  const peerCount = useUIStore((s) => s.peerCount);
+  const simulateFailures = useUIStore((s) => s.simulateFailures);
+  const setSimulateFailures = useUIStore((s) => s.setSimulateFailures);
 
   return (
     <aside className="rail" aria-label="Workspace sidebar">
@@ -44,6 +51,30 @@ export default function Sidebar() {
           </Link>
         ))}
       </nav>
+
+      <div className="rail-footer">
+        <p className="rail-label">Session</p>
+        <div className="presence" aria-live="polite">
+          <Badge tone={peerCount > 0 ? 'success' : 'neutral'}>
+            <span className="presence-dot" aria-hidden="true" /> Live
+          </Badge>
+          <span>
+            {peerCount === 0 ? 'Only this tab' : `${peerCount} other tab${peerCount === 1 ? '' : 's'} open`}
+          </span>
+        </div>
+        <p className="rail-note">
+          You’re <strong>{DISPLAY_NAME}</strong>
+        </p>
+        <ThemeToggle />
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={simulateFailures}
+            onChange={(e) => setSimulateFailures(e.target.checked)}
+          />
+          Simulate flaky sync
+        </label>
+      </div>
     </aside>
   );
 }
