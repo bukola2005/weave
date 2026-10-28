@@ -738,8 +738,29 @@ h1 {
 
 .column-head-actions {
   display: flex;
+  align-items: center;
   gap: 2px;
   flex: none;
+}
+/* Add card is the column's main action: bigger glyph and hit area than the
+   rename/delete icons beside it, and full 44px on touch screens. */
+.btn-icon.column-add {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--accent);
+  border-color: var(--line-strong);
+  background: var(--surface);
+}
+@media (pointer: coarse) {
+  .btn-icon.column-add {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
 }
 
 .card-scroller {

@@ -61,6 +61,7 @@ function Column({ columnId, prevColumnId, nextColumnId, dotColor }: Props) {
           </Button>
           <Button
             variant="icon"
+            className="column-add"
             aria-label={`Add card to ${column.name}`}
             onClick={() => openModal({ type: 'card', columnId: column.id })}
           >
