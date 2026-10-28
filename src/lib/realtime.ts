@@ -152,9 +152,16 @@ export function wireDomainToasts() {
   return domainEvents.subscribe((event) => {
     const { pushToast, announce } = useUIStore.getState();
     switch (event.type) {
-      case 'rollback':
-        pushToast({ tone: 'error', message: `Couldn’t sync ${event.label} — the change was reverted.` });
+      case 'rollback': {
+        // Only fires when a send actually fails. Today that's only the
+        // "Simulate flaky sync" toggle, so name it when it's the cause.
+        const what = event.label.charAt(0).toUpperCase() + event.label.slice(1);
+        const why = useUIStore.getState().simulateFailures
+          ? '“Simulate flaky sync” is on. Try again, or turn it off.'
+          : 'Try again.';
+        pushToast({ tone: 'error', message: `${what} didn’t sync, so it was undone in this tab. ${why}` });
         break;
+      }
       case 'conflict':
         pushToast({
           tone: 'info',
