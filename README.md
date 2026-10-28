@@ -125,6 +125,6 @@ broadcast, never part of undo.
   the skeleton shimmer.
 
 screenshots
-![Weave screenshot 1](images/Weave-1.png)
+![Weave screenshot 1](public/images/Weave-1.png)
 ![Weave screenshot 2](images/Weave-2.png)
 ![Weave screenshot 3](images/Weave-3.png)
