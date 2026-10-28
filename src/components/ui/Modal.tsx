@@ -5,36 +5,35 @@ interface Props {
   title: string;
   description?: string;
   onClose: () => void;
+  size?: 'md' | 'lg';
   children: ReactNode;
 }
 
+const FOCUSABLE =
+  'a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), button:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
 // Generic modal shell: handles the backdrop, Escape-to-close, trapping Tab
 // focus inside the dialog, focusing the first field on open, and returning
-// focus to whatever triggered it on close. Every modal in the app (create
-// board, create/rename column, add/edit card, confirm delete) is built on
+// focus to whatever triggered it on close. Every modal in the app is built on
 // this so the accessibility behaviour only has to be correct once.
-export default function Modal({ titleId, title, description, onClose, children }: Props) {
+export default function Modal({ titleId, title, description, onClose, size = 'md', children }: Props) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<Element | null>(null);
+  // Latest onClose without re-running the focus effect when a parent passes
+  // a new function identity (which would steal focus mid-typing).
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
-    triggerRef.current = document.activeElement;
-    const firstField = dialogRef.current?.querySelector<HTMLElement>(
-      'input, textarea, select, button'
-    );
-    firstField?.focus();
+    const trigger = document.activeElement;
+    dialogRef.current?.querySelector<HTMLElement>('input, textarea, select, button')?.focus();
 
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== 'Tab' || !dialogRef.current) return;
-      const focusables = Array.from(
-        dialogRef.current.querySelectorAll<HTMLElement>(
-          'input, textarea, select, button:not(:disabled)'
-        )
-      );
+      const focusables = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE));
       if (focusables.length === 0) return;
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
@@ -50,9 +49,9 @@ export default function Modal({ titleId, title, description, onClose, children }
     document.addEventListener('keydown', handleKey);
     return () => {
       document.removeEventListener('keydown', handleKey);
-      if (triggerRef.current instanceof HTMLElement) triggerRef.current.focus();
+      if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus();
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -61,7 +60,7 @@ export default function Modal({ titleId, title, description, onClose, children }
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="dialog"
+        className={`dialog${size === 'lg' ? ' dialog-lg' : ''}`}
       >
         <h2 id={titleId}>{title}</h2>
         {description && <p className="dialog-copy">{description}</p>}

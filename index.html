@@ -8,6 +8,16 @@
       rel="stylesheet"
     />
     <title>Weave · Workspace</title>
+    <script>
+      // Apply the saved/system theme before first paint to avoid a light flash.
+      try {
+        var t = localStorage.getItem('weave-theme');
+        if (t !== 'light' && t !== 'dark') {
+          t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

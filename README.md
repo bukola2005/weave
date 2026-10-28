@@ -23,111 +23,103 @@ GitHub repo — https://github.com/bukola2005/weave
 Live deployment — weave-virid-three.vercel.app
 README link — https://github.com/bukola2005/weave/blob/main/README.md
 
+## Scripts
+
+```bash
+npm run dev      # Vite dev server
+npm test         # Vitest: unit + integration tests (jsdom)
+npm run build    # tsc (strict) + production build
+```
+
+Open the app in two tabs to see real-time sync: moves, new cards, and comments
+appear in the other tab live. "Load demo board" creates 240 cards across 22
+columns for performance testing. "Simulate flaky sync" in the sidebar makes
+~35% of outgoing ops fail so you can watch optimistic updates roll back.
+
+## Stage 2 features
+
+- **Drag and drop** — hand-rolled pointer events (mouse, pen, touch), within and
+  across columns, with edge auto-scroll and a drop indicator. Keyboard
+  equivalent: focus a card's ⠿ grip and use the arrow keys.
+- **Real-time across tabs** — `BroadcastChannel`, optimistic local apply with
+  rollback on (simulated) failure, last-write-wins conflict resolution.
+- **Threaded comments** — normalized, up to 3 levels of replies, edit/delete,
+  tombstones for deleted comments that still have replies.
+- **Undo/redo** — command-pattern log of ops + inverses (not snapshots) for card
+  create, delete and move. `Ctrl/⌘+Z`, `Ctrl/⌘+Shift+Z`, toolbar, toast action.
+- **Performance** — per-column list virtualization (variable heights), id-based
+  selectors so a card edit re-renders one card, `content-visibility` on columns.
+- **UX** — skeletons, error boundary, toasts, empty states, dark mode via CSS
+  variable tokens; reusable `Button`, `Input`, `Modal`, `Badge`.
+
+See **[ARCHITECTURE_EVOLUTION.md](ARCHITECTURE_EVOLUTION.md)** for what broke,
+what changed in the state shape, the conflict rule, debt, and scaling notes.
+
 ## Folder structure
 
 ```
 src/
-  types.ts                 # Shared domain types: Board, Column, Card
+  types.ts                  # Board, Column, Card, Comment, Stamp
+  lib/                      # Pure logic, no React — this is what the unit tests cover
+    ops.ts                  # Op union + applyOp reducer + invertOp + snapshot merge (LWW lives here)
+    clock.ts                # Tab id + hybrid logical clock for LWW stamps
+    ordering.ts             # Fractional positions (positionBetween, insertSorted)
+    history.ts              # Command-pattern undo/redo stack
+    comments.ts             # Comment tree building, depth rules
+    dnd.ts                  # Drop-index / move-planning math, auto-scroll, search filter
+    virtual.ts              # Variable-height virtualization math
+    sync.ts                 # BroadcastChannel transport with simulated latency/failure
+    realtime.ts             # App wiring: handshake, presence, persistence, toasts
+    seed.ts                 # 240-card demo board as one batch op
   store/
-    domainStore.ts         # The real data: boards, columns, cards + all mutations
-    uiStore.ts              # Transient screen state: which modal is open, and for what
+    domainStore.ts          # Entities + op pipeline + per-tab history slice
+    uiStore.ts              # Modals, toasts, theme, drag/drop target, search, sync status
+  dnd/dragController.ts     # Pointer tracking, ghost, hit-testing (DOM side of DnD)
+  hooks/useVirtualList.ts   # Measures cards, returns the visible window
   components/
-    Sidebar.tsx              # Persistent board switcher, shown on every route
-    BoardTile.tsx             # One board card on the Dashboard
-    Column.tsx                # One column on the Board View (memoized)
-    CardItem.tsx              # One card inside a column (memoized)
-    Modal.tsx                 # Generic modal shell: focus trap, Escape, focus return
-    BoardFormModal.tsx        # Create-board form
-    ColumnFormModal.tsx       # Create/rename-column form
-    CardFormModal.tsx         # Create/edit-card form
-    ConfirmDeleteModal.tsx    # Shared delete confirmation for boards/columns/cards
-    ModalRoot.tsx             # Reads uiStore and renders whichever modal is active
-  pages/
-    Dashboard.tsx            # Workspace Dashboard: list/create/delete boards
-    BoardView.tsx             # Board View: columns + cards (lazy-loaded)
-  styles/
-    global.css                # All styling, theme variables at the top
+    ui/                     # Button, Input, Modal, Badge, Skeleton, EmptyState
+    comments/               # CommentThread, CommentItem, CommentForm
+    Column.tsx, CardList.tsx, CardItem.tsx, ErrorBoundary.tsx, ToastRegion.tsx, ...
+  pages/                    # Dashboard, BoardView (lazy)
+  test/                     # setup + integration test
 ```
-
-Pages own layout and data-fetching from the store; components are presentational
-and receive what they need as props (plus direct store access only for actions
-like delete/move, to avoid prop-drilling callbacks through several layers).
 
 ## State architecture
 
-Two separate Zustand stores, not one:
+Still two Zustand stores, split the same way as Stage 1:
 
-**`domainStore`** — the real content. Normalized by id instead of nested arrays:
+**`domainStore`** — the real content, normalized by id:
 
 ```
-boards:  { [boardId]:  { id, title, description, createdAt, columnIds: [id, id, ...] } }
-columns: { [columnId]: { id, boardId, name, cardIds: [id, id, ...] } }
-cards:   { [cardId]:   { id, columnId, title, description, tags, dueDate } }
+boards:         { [id]: { id, title, description, createdAt, columnIds*, edited } }
+columns:        { [id]: { id, boardId, name, position, cardIds*, edited } }
+cards:          { [id]: { id, columnId, title, description, tags, dueDate, position, edited, placed } }
+comments:       { [id]: { id, cardId, parentId, author, body, createdAt, deleted, edited, editedByUser } }
+commentsByCard: { [cardId]: [commentId, ...] }*
+history:        { past: Command[], future: Command[] }   // per tab, never synced or saved
+                                                   * = derived index, rebuilt from entities
 ```
 
-Each level only stores *ids* of the level below it, ordered in an array. Moving a
-card between columns touches exactly three things: the card's own `columnId`,
-the source column's `cardIds`, and the destination column's `cardIds` — all three
-updated in one `set()` call, so the store is never briefly inconsistent.
+Every change is a serializable **op** run through one pure reducer
+(`lib/ops.ts`). Local actions, remote ops from other tabs, undo and redo all take
+that same path. Components still call the Stage 1 action names (`addCard`,
+`moveCard`, `deleteCard`, …).
 
-Why normalized instead of nested (`board.columns[].cards[]`): updating one card
-would otherwise mean rebuilding the entire board tree. With normalization,
-updating a card only touches `cards[cardId]` — every component reading boards or
-columns skips re-rendering entirely.
-
-**`uiStore`** — purely what's on screen: which modal is open (`activeModal`) and
-what it needs (a board id, a column id, a card id to edit). None of this is data
-that gets saved; it only describes the current screen. Keeping it separate from
-`domainStore` means the data layer has no idea the UI exists, and a reviewer can
-tell at a glance which state is "real" and which is just screen bookkeeping.
-
-**Scaling to Stage 2 (real-time):** because state is normalized by id, applying
-an incoming real-time update (e.g. "card X moved to column Y") is a single
-targeted `set()` patch to `cards[X]` and the two affected `columns[...].cardIds`
-— no need to diff or rebuild a nested tree.
-
-## Performance strategy
-
-- `Column` and `CardItem` are wrapped in `React.memo` — a card re-renders only
-  when its own props change, not when a sibling card or column changes.
-- Zustand selectors (`useDomainStore(s => s.boards)`) subscribe components to
-  only the slice of state they read, so an edit to one card doesn't re-render
-  the whole board.
-- `BoardView` is lazy-loaded (`React.lazy` + `Suspense`) — its bundle (columns,
-  cards, modals, markdown parsing) only loads once a board is actually opened,
-  keeping the Dashboard's initial load light.
-- `useMemo` is used for derived lists (ordered columns, filtered/searched cards)
-  so they're only recalculated when their actual inputs change, not on every
-  render.
+**`uiStore`** — only what's on screen: the active modal, toasts, theme, search
+query, the card being dragged and its hovered drop slot, and sync status. Never
+broadcast, never part of undo.
 
 ## Accessibility
 
-- Semantic structure: `<section>`/`<article>`/`<nav>`/`<aside>` throughout,
-  headings in order, lists for card/column collections.
-- Every icon-only button has an `aria-label` (delete, move left/right, rename).
-- Modals: focus moves to the first field on open, Tab/Shift+Tab is trapped
-  inside the dialog, Escape closes it, and focus returns to the element that
-  opened it on close — all handled once in `Modal.tsx` and reused by every
-  modal in the app.
-- Visible focus outlines (`:focus-visible`) on every interactive element —
-  never relying on color or hover alone.
-
-## Key engineering decisions
-
-- **No UI library / no Tailwind**: one hand-written stylesheet using CSS custom
-  properties (`--accent`, `--paper`, etc.) for the whole theme, so the
-  color/spacing system is explicit and easy to defend in review.
-- **Modals centralized through `uiStore` + `ModalRoot`**: pages never render a
-  modal directly, they just call `openModal({...})`. This keeps modal state in
-  one place instead of scattered `useState` flags across components.
-- **Delete is destructive and cascades**: deleting a board removes its columns
-  and cards; deleting a column removes its cards. This is modeled explicitly in
-  `domainStore` rather than left as a dangling reference.
-
-## What I'd do with more time
-
-- Drag-and-drop for reordering columns and cards (explicitly out of scope for
-  Stage 1)
-- Undo for deletes
-- Persisting state to `localStorage` or a backend (currently in-memory only —
-  refreshing the page resets the board)
+- Semantic structure throughout (`section`/`article`/`nav`/`aside`, lists for
+  cards and comment threads, nested lists for replies).
+- Every icon-only button has an `aria-label`; badges that are just icon + number
+  carry a full label ("2 comments").
+- Drag and drop has a full keyboard path (grip + arrow keys); moves are
+  announced in a polite live region and focus follows the moved card, even into
+  a virtualized column.
+- Modals: focus moves in on open, Tab is trapped, Escape closes, focus returns
+  on close. Escape inside a comment editor cancels the edit, not the modal.
+- Toasts: errors in an assertive region, everything else polite.
+- Theme toggle is a `role="switch"`; reduced-motion disables transitions and
+  the skeleton shimmer.

@@ -1,90 +1,97 @@
-import { memo, useMemo } from 'react';
-import type { Column as ColumnType, Card } from '../types';
+import { memo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useDomainStore } from '../store/domainStore';
 import { useUIStore } from '../store/uiStore';
-import CardItem from './CardItem';
+import { filterCardIds } from '../lib/dnd';
+import Button from './ui/Button';
+import EmptyState from './ui/EmptyState';
+import CardList from './CardList';
 
 interface Props {
-  column: ColumnType;
-  cardsRecord: Record<string, Card>;
-  orderedColumns: ColumnType[];
+  columnId: string;
+  prevColumnId?: string;
+  nextColumnId?: string;
   dotColor: string;
-  searchQuery: string;
 }
 
-function Column({ column, cardsRecord, orderedColumns, dotColor, searchQuery }: Props) {
+// Reads its own column by id and selects only the *ids* of matching cards
+// (compared shallowly). Editing a card's description doesn't change that
+// list, so the column doesn't re-render — only the CardItem does.
+function Column({ columnId, prevColumnId, nextColumnId, dotColor }: Props) {
+  const column = useDomainStore((s) => s.columns[columnId]);
+  const searchQuery = useUIStore((s) => s.searchQuery);
+  const visibleIds = useDomainStore(
+    useShallow((s) => filterCardIds(s.columns[columnId]?.cardIds ?? [], s.cards, searchQuery))
+  );
+  const isDropTarget = useUIStore((s) => s.dropTarget?.columnId === columnId);
   const openModal = useUIStore((s) => s.openModal);
 
-  const cards = useMemo(
-    () => column.cardIds.map((id) => cardsRecord[id]).filter(Boolean),
-    [column.cardIds, cardsRecord]
-  );
-
-  const visibleCards = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return cards;
-    return cards.filter((card) =>
-      [card.title, ...card.tags].join(' ').toLowerCase().includes(query)
-    );
-  }, [cards, searchQuery]);
+  if (!column) return null;
+  const total = column.cardIds.length;
+  const filtered = searchQuery.trim() !== '';
 
   return (
-    <section aria-label={`${column.name} column`} className="column">
+    <section
+      aria-label={`${column.name} column`}
+      className={`column${isDropTarget ? ' is-drop-target' : ''}`}
+      data-column-id={column.id}
+    >
       <div className="column-head">
         <div className="column-name">
           <span className="dot" style={{ background: dotColor }} aria-hidden="true" />
           <h3>{column.name}</h3>
-          <span className="count">{visibleCards.length}</span>
+          <span className="count" aria-label={filtered ? `${visibleIds.length} of ${total} cards` : `${total} cards`}>
+            {filtered ? `${visibleIds.length}/${total}` : total}
+          </span>
         </div>
         <div className="column-head-actions">
-          <button
-            type="button"
-            className="icon-button"
+          <Button
+            variant="icon"
             aria-label={`Rename ${column.name}`}
-            onClick={() =>
-              openModal({ type: 'renameColumn', columnId: column.id, currentName: column.name })
-            }
+            onClick={() => openModal({ type: 'renameColumn', columnId: column.id, currentName: column.name })}
           >
             ✎
-          </button>
-          <button
-            type="button"
-            className="icon-button"
+          </Button>
+          <Button
+            variant="icon"
             aria-label={`Delete ${column.name} column`}
-            onClick={() =>
-              openModal({ type: 'confirmDelete', kind: 'column', id: column.id, label: column.name })
-            }
+            onClick={() => openModal({ type: 'confirmDelete', kind: 'column', id: column.id, label: column.name })}
           >
             ✕
-          </button>
-          <button
-            type="button"
-            className="icon-button"
+          </Button>
+          <Button
+            variant="icon"
             aria-label={`Add card to ${column.name}`}
             onClick={() => openModal({ type: 'card', columnId: column.id })}
           >
             +
-          </button>
+          </Button>
         </div>
       </div>
 
-      {cards.length === 0 ? (
-        <div className="column-empty">
-          <p>Nothing in this column yet. Add a card to get it moving.</p>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => openModal({ type: 'card', columnId: column.id })}
-          >
-            Add a card
-          </button>
-        </div>
+      {total === 0 ? (
+        <EmptyState
+          compact
+          headingLevel="h3"
+          title="Nothing here yet"
+          action={
+            <Button onClick={() => openModal({ type: 'card', columnId: column.id })}>Add a card</Button>
+          }
+        >
+          {isDropTarget ? 'Drop to move the card here.' : 'Add a card, or drag one in from another column.'}
+        </EmptyState>
+      ) : visibleIds.length === 0 ? (
+        <EmptyState compact headingLevel="h3" title="No matches">
+          No cards here match “{searchQuery.trim()}”.
+        </EmptyState>
       ) : (
-        <ul className="card-list" aria-label={`Cards in ${column.name}`}>
-          {visibleCards.map((card) => (
-            <CardItem key={card.id} card={card} orderedColumns={orderedColumns} />
-          ))}
-        </ul>
+        <CardList
+          columnId={column.id}
+          columnName={column.name}
+          ids={visibleIds}
+          prevColumnId={prevColumnId}
+          nextColumnId={nextColumnId}
+        />
       )}
     </section>
   );
