@@ -123,3 +123,8 @@ broadcast, never part of undo.
 - Toasts: errors in an assertive region, everything else polite.
 - Theme toggle is a `role="switch"`; reduced-motion disables transitions and
   the skeleton shimmer.
+
+screenshots
+![Weave screenshot 1](images/Weave-1.png)
+![Weave screenshot 2](images/Weave-2.png)
+![Weave screenshot 3](images/Weave-3.png)
