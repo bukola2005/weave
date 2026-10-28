@@ -17,11 +17,11 @@ npm install
 npm run dev
 ```
 
-link, in order:
+Links:
 
-GitHub repo — https://github.com/bukola2005/weave
-Live deployment — weave-virid-three.vercel.app
-README link — https://github.com/bukola2005/weave/blob/main/README.md
+- GitHub repo: https://github.com/bukola2005/weave
+- Live deployment: https://weave-virid-three.vercel.app
+- README: https://github.com/bukola2005/weave/blob/main/README.md
 
 ## Scripts
 
@@ -69,8 +69,9 @@ src/
     dnd.ts                  # Drop-index / move-planning math, auto-scroll, search filter
     virtual.ts              # Variable-height virtualization math
     sync.ts                 # BroadcastChannel transport with simulated latency/failure
-    realtime.ts             # App wiring: handshake, presence, persistence, toasts
+    realtime.ts             # App wiring: handshake, presence, toasts
     seed.ts                 # 240-card demo board as one batch op
+  api/boardApi.ts           # BoardApi persistence boundary (moveCard, ...) + localStorage mock
   store/
     domainStore.ts          # Entities + op pipeline + per-tab history slice
     uiStore.ts              # Modals, toasts, theme, drag/drop target, search, sync status
@@ -109,6 +110,39 @@ that same path. Components still call the Stage 1 action names (`addCard`,
 query, the card being dragged and its hovered drop slot, and sync status. Never
 broadcast, never part of undo.
 
+## Performance strategy
+
+The target: stay responsive on a 240-card, 22-column board ("Load demo
+board").
+
+- **Virtualized card lists.** Past 30 cards, a column only mounts the cards
+  near its scroll window (`hooks/useVirtualList.ts`). Card heights vary, so
+  each card is measured once by a shared `ResizeObserver` and cached by id;
+  positions come from prefix sums and a binary search. On the demo board the
+  85-card Inbox mounts about 6 cards, and the whole board mounts 139 of 241.
+- **Per-id selectors.** Each component reads only its own slice of the store:
+  - `BoardView` subscribes to the board only.
+  - `Column` selects its own visible card ids (compared shallowly).
+  - `CardItem` selects its own card by id and gets only primitive props.
+
+  So editing a card re-renders that one card, and a move re-renders only the
+  columns involved. In Stage 1, any card change re-rendered every column, and
+  a move re-rendered every card.
+- **`content-visibility: auto` on columns.** The browser skips layout and paint
+  for columns scrolled off-screen, which matters on a 22-column board.
+- **Drag does no React work per pointer move.** The drag preview is moved
+  directly in the DOM inside `requestAnimationFrame`; the store is only written
+  when the hovered drop slot changes.
+- **Batched seed.** The demo board is created as one batch op: one state
+  update and one broadcast instead of 263.
+
+Measured timings and what still needs profiling are in
+[ARCHITECTURE_EVOLUTION.md §4](ARCHITECTURE_EVOLUTION.md#4-performance-what-was-profiled-and-changed):
+- Rough dev-build medians: cross-column move ≈ 25 ms, move in a virtualized
+  column ≈ 42 ms, search keystroke ≈ 38 ms.
+- Not yet done: a React DevTools Profiler run.
+- Known re-render debt in comment threads: see §6.
+
 ## Accessibility
 
 - Semantic structure throughout (`section`/`article`/`nav`/`aside`, lists for
@@ -124,7 +158,10 @@ broadcast, never part of undo.
 - Theme toggle is a `role="switch"`; reduced-motion disables transitions and
   the skeleton shimmer.
 
-screenshots
-![Weave screenshot 1](public/images/Weave-1.png)
-![Weave screenshot 2](images/Weave-2.png)
-![Weave screenshot 3](images/Weave-3.png)
+## Screenshots
+
+![Dashboard in dark mode, listing the "meeting" board and the 240-card demo board](public/images/Weave-1.png)
+
+![The 240-card demo board: Inbox, Triage and Research columns with tags, due-date badges and the enlarged add-card buttons](public/images/Weave-2.png)
+
+![The "Add a card" modal open over the demo board](public/images/Weave-3.png)

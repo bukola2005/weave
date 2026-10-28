@@ -92,6 +92,38 @@ kept. The other tab converges silently when the newer op reaches it.
 `lib/ops.test.ts` checks convergence for both arrival orders of concurrent
 edits, concurrent moves, edit vs. move, and delete vs. edit.
 
+### Why last-write-wins, and not something smarter
+
+The honest cost first: **with LWW, a concurrent edit is silently lost.** If
+two people retitle the same card at the same moment, one title is discarded.
+Only the tab holding the winning write gets the conflict toast; the person
+whose edit lost isn't told. The alternatives, and why I didn't pick them:
+
+- **Field-level merge** (one stamp per field). This would keep both changes
+  when one person edits the title and another edits the description. It's the
+  cheapest upgrade from where we are: the card already has two registers
+  (`edited` for content, `placed` for position) for exactly this reason, so
+  edit-vs-move never conflicts. Going per-field means a stamp per field and
+  more merge code. That's worth doing (it's in the 3-week plan), but it
+  doesn't change the rule, only how finely it applies.
+- **Operational transforms (OT).** OT merges concurrent *text* edits
+  character by character, the way Google Docs does. It needs a central server
+  to order and transform every op, and the transform functions are hard to
+  get right. Weave has no server, and card fields are short titles and notes,
+  not long documents edited by many people at once.
+- **CRDTs** (e.g. Yjs, Automerge). These converge without a server and can
+  merge text too. The costs: a sizeable dependency, metadata and tombstones
+  that grow with edit history, and undo that's harder to reason about per
+  user. Part of this design is already CRDT-like: LWW registers and fractional
+  positions converge regardless of op order. But "deletes win without
+  tombstones" is a deliberate shortcut that a real CRDT wouldn't take.
+
+LWW was the right fit here because it's easy to explain, small to implement
+(one comparison in `applyOp`), easy to test for convergence, and good enough
+for short structured fields where a lost edit is visible and quick to redo.
+If Weave gains long-form text fields edited together, that field should move
+to a text CRDT. The rest of the board can stay LWW.
+
 ---
 
 ## 3. What changed in the state structure
@@ -128,6 +160,15 @@ edits, concurrent moves, edit vs. move, and delete vs. edit.
   slots against the same filtered list the columns render.
 - **The store is a factory** (`createDomainStore`). The app uses one instance;
   tests create isolated ones with a fake transport.
+- **Persistence sits behind an API** (`src/api/boardApi.ts`). The `BoardApi`
+  interface has endpoint-style methods: `moveCard(cardId, toColumnId,
+  position, stamp)`, `createCard`, `deleteCard`, and a generic `commit` for
+  everything else. The store calls it only when an op is *confirmed* (its send
+  succeeded, or it came from another tab), so a rolled-back change is never
+  saved. Today the implementation is a localStorage mock. A real backend
+  replaces that one file; nothing else writes storage. The two layers are
+  separate on purpose: `Transport` moves ops between live tabs and can fail,
+  while `BoardApi` keeps the confirmed board across reloads.
 
 ---
 
@@ -187,7 +228,41 @@ Record the actual numbers in this doc once you've done this.
 
 ---
 
-## 5. Technical debt
+## 5. Custom drag-and-drop vs. a library (dnd-kit)
+
+The brief ruled out an external drag-and-drop library, so the controller is
+hand-written. That constraint aside, here is how it compares with
+[dnd-kit](https://dndkit.com), the usual React choice, on the points that
+matter for this app.
+
+| | Custom (`dnd/dragController.ts`) | dnd-kit |
+|---|---|---|
+| **Bundle size** (measured: minified / gzipped, React excluded) | 4.6 KB / 1.9 KB. 416 lines across the controller and the drop/ordering math. | 47.0 KB / 16.1 KB for `@dnd-kit/core` 6.3.1 + `@dnd-kit/sortable` 10.0.0, counting only the exports a sortable board needs. |
+| **Accessibility** | Keyboard path is grip + arrow keys, with live-region announcements and focus following the card. Nothing is announced *during* a pointer drag, only the result. | Built-in keyboard sensor and screen-reader announcements for pick-up, move over, drop and cancel, all customizable. More complete out of the box. |
+| **Touch** | Pointer events. On touch, only the grip starts a drag (so the column still scrolls), after a 5 px threshold. No long-press delay. **Only exercised with synthetic pointer events, never on a real phone or tablet.** | Pointer and touch sensors with configurable activation (delay, distance, tolerance) for telling scroll from drag, and much wider real-device use. |
+| **Virtualization** | Designed with it: hit-testing reads only mounted cards plus their `data-index`, and edge auto-scroll brings more cards into the window mid-drag. | Sortable items register while mounted, so cards virtualized out of the window aren't drop targets. Making long virtualized lists work means custom collision detection or extra bookkeeping. |
+| **Maintenance** | We own every quirk, e.g. swallowing the click that follows a drop, and rAF pausing in background tabs. The math has 17 unit tests, but the DOM controller has no automated test (jsdom has no layout). | Maintained by others and battle-tested across browsers. The cost is a sizeable API to learn and major-version upgrades to track (sortable is on 10.x). |
+
+**Verdict.** For this board, custom wins on size (about 8× smaller gzipped)
+and on virtualization fit, and the keyboard path covers the accessibility
+basics. dnd-kit clearly wins on touch robustness and announcements during a
+drag, and those are the two gaps I'd worry about before shipping to real
+users.
+
+I'd switch to dnd-kit if the product needs any of these:
+- multi-select drag,
+- nested sortables (e.g. dragging columns *and* cards),
+- drop animations,
+- confidence on real touch devices without building a device-testing setup.
+
+The switch would be contained. The ordering model (fractional positions),
+`planDrop` and the `card/move` op are independent of the controller, so only
+`dragController.ts` would be replaced; dnd-kit's `onDragEnd` would call the
+same `planDrop` → `moveCard` path.
+
+---
+
+## 6. Technical debt
 
 - **Board and column deletes aren't undoable.** Their inverse would need to
   recreate a cascade of columns, cards and comments. The confirmation dialog
@@ -215,10 +290,32 @@ Record the actual numbers in this doc once you've done this.
   for one board, but it would need scoping for nested drag surfaces.
 - **The "Undo" button in the delete toast undoes the latest command,** not
   necessarily that delete, if something else happened in between.
+- **Comment threads re-render too much (known, not yet fixed).** The comments
+  are stored efficiently (flat and normalized), but rendering a thread isn't:
+  - `CommentThread` subscribes to the *entire* `comments` record, so adding,
+    editing or deleting any comment on any card re-renders every open thread.
+  - It then rebuilds the whole tree with `buildCommentTree`, which creates new
+    node objects on every call. `CommentItem` is wrapped in `React.memo`, but
+    since every node prop is a new object, the memo never skips a render: one
+    edited comment re-renders every comment in the thread.
+  - That's fine for a dozen comments. With hundreds, every comment change
+    costs render work proportional to the whole thread. This was never
+    measured: the 240-card demo board has no comments.
+
+  The real fix:
+  - Each `CommentItem` selects its own comment by id
+    (`s.comments[id]`) and gets only the id and depth as props.
+  - Child ids per comment come from a derived index (e.g. `repliesByParent`,
+    kept by the reducer like `commentsByCard`).
+  - `CommentThread` then subscribes only to `commentsByCard[cardId]`, and an
+    edit re-renders one comment.
+  - For very long threads, collapse replies past a threshold or virtualize the
+    root list.
+  - Add a demo board with large threads so it can be profiled.
 
 ---
 
-## 6. With 3 more weeks
+## 7. With 3 more weeks
 
 1. **Week 1: a real server and an op log.** Replace `BroadcastChannel` with a
    WebSocket `Transport` (the interface already isolates it). The server
@@ -239,7 +336,7 @@ Record the actual numbers in this doc once you've done this.
 
 ---
 
-## 7. Scaling to 10,000 users
+## 8. Scaling to 10,000 users
 
 The current design is local-first and peer-to-peer within one browser. At
 10,000 users, three things change.
