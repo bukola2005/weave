@@ -160,8 +160,8 @@ Measured timings and what still needs profiling are in
 
 ## Screenshots
 
-![Dashboard in dark mode, listing the "meeting" board and the 240-card demo board](public/images/Weave-1.png)
+![Dashboard in dark mode, listing the "meeting" board and the 240-card demo board](/public/images/Weave-1.png)
 
-![The 240-card demo board: Inbox, Triage and Research columns with tags, due-date badges and the enlarged add-card buttons](public/images/Weave-2.png)
+![The 240-card demo board: Inbox, Triage and Research columns with tags, due-date badges and the enlarged add-card buttons](/public/images/Weave-2.png)
 
-![The "Add a card" modal open over the demo board](public/images/Weave-3.png)
+![The "Add a card" modal open over the demo board](/public/images/Weave-3.png)
