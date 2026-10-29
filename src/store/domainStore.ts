@@ -10,6 +10,7 @@ import { buildDemoBoard } from '../lib/seed';
 import { DISPLAY_NAME } from '../lib/identity';
 import { createEmitter, type Emitter } from '../lib/events';
 import type { Envelope, Transport } from '../lib/sync';
+import { persistOp, type BoardApi } from '../api/boardApi';
 
 // DOMAIN state: the real content of the app (boards, columns, cards, comments).
 // Still normalized by id (Record<id, item>). What changed for Stage 2:
@@ -31,6 +32,7 @@ export interface DomainState extends DomainData {
   receive: (env: Envelope) => Outcome;
   replaceData: (data: DomainData) => void;
   setTransport: (transport: Transport | null) => void;
+  setApi: (api: BoardApi | null) => void;
   undo: () => void;
   redo: () => void;
 
@@ -64,8 +66,11 @@ const pickData = (s: DomainData): DomainData => ({
 
 const cardLabel = (card: Card | undefined) => (card ? `“${card.title}”` : 'card');
 
-export function createDomainStore(options: { transport?: Transport | null; events?: Emitter } = {}) {
+export function createDomainStore(
+  options: { transport?: Transport | null; api?: BoardApi | null; events?: Emitter } = {}
+) {
   let transport = options.transport ?? null;
+  let api = options.api ?? null;
   const events = options.events ?? createEmitter();
 
   // Optimistic rebase. `confirmed` holds only what other tabs can also have:
@@ -78,6 +83,14 @@ export function createDomainStore(options: { transport?: Transport | null; event
   // that other tabs had already received, and the tabs would end up out of sync.
   let confirmed: DomainData = emptyData();
   let pending: Envelope[] = [];
+
+  // An op becomes confirmed exactly once: its send succeeded, it arrived from
+  // another tab, or there's no transport at all. Only then is it persisted,
+  // so the API never stores a change that later gets rolled back.
+  const confirm = (env: Envelope) => {
+    confirmed = applyOp(confirmed, env.op, env.stamp).data;
+    if (api) void persistOp(api, env);
+  };
 
   const store = createStore<DomainState>()((set, get) => {
     const run = (op: Op, undoLabel?: string): { outcome: Outcome; env?: Envelope } => {
@@ -95,14 +108,14 @@ export function createDomainStore(options: { transport?: Transport | null; event
       set({ ...result.data, history });
 
       if (!transport) {
-        confirmed = applyOp(confirmed, op, at).data;
+        confirm(env);
         return { outcome: 'applied', env };
       }
       pending.push(env);
       transport.send(env).then(
         () => {
           pending = pending.filter((p) => p.opId !== env.opId);
-          confirmed = applyOp(confirmed, op, at).data;
+          confirm(env);
         },
         () => {
           pending = pending.filter((p) => p.opId !== env.opId);
@@ -125,7 +138,7 @@ export function createDomainStore(options: { transport?: Transport | null; event
         // Remote ops are confirmed by definition. Applying them to both layers
         // gives the same result as replaying `pending` on top, because LWW
         // stamps make the outcome independent of the order ops arrive in.
-        confirmed = applyOp(confirmed, env.op, env.stamp).data;
+        confirm(env);
         const before = pickData(get());
         const result = applyOp(before, env.op, env.stamp);
         if (result.outcome === 'applied') set(result.data);
@@ -141,10 +154,15 @@ export function createDomainStore(options: { transport?: Transport | null; event
         confirmed = pickData(data);
         pending = [];
         set(confirmed);
+        if (api) void api.replaceWorkspace(confirmed);
       },
 
       setTransport: (next) => {
         transport = next;
+      },
+
+      setApi: (next) => {
+        api = next;
       },
 
       undo: () => {

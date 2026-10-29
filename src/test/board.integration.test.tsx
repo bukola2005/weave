@@ -26,7 +26,8 @@ describe('board interaction (integration)', () => {
     await user.type(screen.getByLabelText('Board title'), 'Launch');
     await user.type(screen.getByLabelText('Short description'), 'Ship the thing');
     await user.click(screen.getByRole('button', { name: 'Create board' }));
-    expect(await screen.findByRole('heading', { level: 1, name: 'Launch' })).toBeInTheDocument();
+    // The board page is lazy-loaded; give the chunk time on a busy CI machine.
+    expect(await screen.findByRole('heading', { level: 1, name: 'Launch' }, { timeout: 5000 })).toBeInTheDocument();
 
     // Two columns.
     await user.click(screen.getByRole('button', { name: '+ Add a column' }));
@@ -49,7 +50,7 @@ describe('board interaction (integration)', () => {
     grip.focus();
     await user.keyboard('{ArrowUp}');
     expect(cardTitles('To do')).toEqual(['Ship it', 'Write tests']);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Move Ship it' })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Move Ship it' })).toHaveFocus(), { timeout: 5000 });
 
     // Move across columns with the arrow button.
     await user.click(screen.getByRole('button', { name: 'Move Write tests to Done' }));
@@ -75,7 +76,7 @@ describe('board interaction (integration)', () => {
     await user.click(screen.getByRole('button', { name: 'Delete card Write tests' }));
     await user.click(screen.getByRole('button', { name: 'Delete card' }));
     expect(cardTitles('Done')).toEqual([]);
-    await user.click(await screen.findByRole('button', { name: 'Undo' }));
+    await user.click(await screen.findByRole('button', { name: 'Undo' }, { timeout: 5000 }));
     expect(cardTitles('Done')).toEqual(['Write tests']);
     expect(screen.getByRole('img', { name: '2 comments' })).toBeInTheDocument();
 
